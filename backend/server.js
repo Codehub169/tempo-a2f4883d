@@ -70,7 +70,7 @@ const frontendBuildPath = path.join(__dirname, '../../frontend/dist');
 const indexPath = path.resolve(frontendBuildPath, 'index.html');
 
 if (process.env.NODE_ENV === 'production') {
-    if (fs.existsSync(indexPath)) {
+    if (fs.existsSync(frontendBuildPath) && fs.existsSync(indexPath)) {
         app.use(express.static(frontendBuildPath));
 
         app.get('*', (req, res, next) => {
@@ -83,7 +83,7 @@ if (process.env.NODE_ENV === 'production') {
         });
         console.log(`Production mode: Serving frontend from ${frontendBuildPath}`);
     } else {
-        console.warn(`WARNING: Production mode, but frontend build not found at ${indexPath}. Frontend will not be served by Express.`);
+        console.warn(`WARNING: Production mode, but frontend build directory ('${frontendBuildPath}') or index.html ('${indexPath}') not found. Frontend will not be served by Express.`);
         // Fallback for root path if frontend is not available
         app.get('/', (req, res) => {
             res.json({ message: 'API is running. Frontend build not found or not served.' });
@@ -117,8 +117,8 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
-    if (process.env.NODE_ENV === 'production' && !fs.existsSync(indexPath)) {
-      console.log('Note: Frontend may not be accessible if build is missing or path is incorrect.');
+    if (process.env.NODE_ENV === 'production' && (!fs.existsSync(frontendBuildPath) || !fs.existsSync(indexPath))) {
+      console.log('Note: Frontend may not be accessible if build is missing or paths are incorrect.');
     }
 });
 
