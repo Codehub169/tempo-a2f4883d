@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 import db from './config/db.js';
 import authRoutes from './routes/auth.routes.js';
@@ -17,21 +18,19 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 9000;
+const PORT = 9000; // Strictly use port 9000 as per requirement
 
 // Middleware
 app.use(cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000', // For dev; set FRONTEND_URL in prod if frontend is on a different domain
     credentials: true,
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json()); // For parsing application/json
+app.use(express.urlencoded({ extended: true })); // For parsing application/x-www-form-urlencoded
 
 // Database connection test (optional, db.js handles initialization)
 async function testDbConnection() {
     try {
-        // The db object from db.js is the connection itself.
-        // A simple query to test if it's working.
         await new Promise((resolve, reject) => {
             db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='users'", (err, row) => {
                 if (err) {
@@ -41,16 +40,17 @@ async function testDbConnection() {
                 if (row) {
                     console.log('Users table exists. Database connected and schema likely initialized.');
                 } else {
-                    console.log('Users table does not exist. Initialization might be pending or failed.');
+                    console.warn('Users table does not exist. Database initialization might be pending or failed.');
                 }
                 resolve();
             });
         });
     } catch (error) {
         console.error('Failed to connect to the database or run initial check:', error);
-        process.exit(1);
+        process.exit(1); // Exit if DB check fails, as it's critical for the app
     }
 }
+// Call the DB test. It's async but we don't await; it exits on critical failure.
 testDbConnection();
 
 // API Routes
@@ -60,32 +60,66 @@ app.use('/api/products', productRoutes);
 // app.use('/api/orders', orderRoutes);
 // app.use('/api/users', userRoutes);
 
-// Serve frontend static files in production
-if (process.env.NODE_ENV === 'production') {
-    const frontendBuildPath = path.join(__dirname, '../../frontend/dist');
-    app.use(express.static(frontendBuildPath));
+// Catch-all for API routes that weren't matched by previous handlers
+app.use('/api/*', (req, res) => {
+    res.status(404).json({ message: 'API endpoint not found.' });
+});
 
-    // For any route not handled by API, serve index.html
-    app.get('*', (req, res) => {
-        res.sendFile(path.resolve(frontendBuildPath, 'index.html'));
-    });
+// Serve frontend static files and SPA fallback in production
+const frontendBuildPath = path.join(__dirname, '../../frontend/dist');
+const indexPath = path.resolve(frontendBuildPath, 'index.html');
+
+if (process.env.NODE_ENV === 'production') {
+    if (fs.existsSync(indexPath)) {
+        app.use(express.static(frontendBuildPath));
+
+        app.get('*', (req, res, next) => {
+            // For any non-API, non-static file route, serve index.html for SPA routing
+            res.sendFile(indexPath, (err) => {
+                if (err) {
+                    next(err); // Pass error to global error handler
+                }
+            });
+        });
+        console.log(`Production mode: Serving frontend from ${frontendBuildPath}`);
+    } else {
+        console.warn(`WARNING: Production mode, but frontend build not found at ${indexPath}. Frontend will not be served by Express.`);
+        // Fallback for root path if frontend is not available
+        app.get('/', (req, res) => {
+            res.json({ message: 'API is running. Frontend build not found or not served.' });
+        });
+    }
 } else {
+    // Development mode: API only, frontend served by its own dev server
     app.get('/', (req, res) => {
-        res.send('Refurbish Marketplace API is running in development mode.');
+        res.json({ message: 'Refurbish Marketplace API is running in development mode.' });
     });
+    console.log('Development mode: API server started. Frontend should be served separately.');
 }
 
 // Global Error Handler
+// eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(err.status || 500).json({
+    console.error(err.stack); // Log the full error stack for debugging
+    const statusCode = err.status || 500;
+    
+    const errorResponse = {
         message: err.message || 'An unexpected error occurred',
-        error: process.env.NODE_ENV === 'development' ? err : {}
-    });
+    };
+
+    // Include full error object only in development for security reasons
+    if (process.env.NODE_ENV === 'development') {
+        errorResponse.error = err; 
+    }
+
+    res.status(statusCode).json(errorResponse);
 });
 
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
+    if (process.env.NODE_ENV === 'production' && !fs.existsSync(indexPath)) {
+      console.log('Note: Frontend may not be accessible if build is missing or path is incorrect.');
+    }
 });
 
 export default app; // For testing purposes if needed
