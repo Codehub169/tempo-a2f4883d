@@ -19,9 +19,11 @@ const applySchema = (dbInstance) => {
             }
             dbInstance.exec(sqlScript, (execErr) => {
                 if (execErr) {
+                    // CREATE TABLE IF NOT EXISTS should not cause an error if tables exist.
+                    // This handles other potential exec errors for schema.
                     if (execErr.message.includes('already exists')) {
-                        console.log('Seed.js: Schema previously applied or tables exist.');
-                        resolve();
+                        console.log('Seed.js: Schema previously applied or tables exist (though IF NOT EXISTS should prevent this error).');
+                        resolve(); // Still resolve as IF NOT EXISTS should handle it gracefully.
                     } else {
                         console.error('Error executing schema in seed.js:', execErr.message);
                         reject(new Error('Failed to execute schema: ' + execErr.message));
@@ -86,37 +88,37 @@ const seedProducts = async (db) => {
             name: 'Refurbished Smart TV 4K 55"', description: 'Excellent condition 55-inch 4K Smart TV with HDR. Includes remote and stand.',
             price: 299.99, category: 'TVs', condition: 'Excellent', stock: 10,
             images: JSON.stringify(['https://placehold.co/600x400/007BFF/white?text=Refurb+TV+1', 'https://placehold.co/600x400/007BFF/white?text=Refurb+TV+2']),
-            sellerId: 2 // Bob Seller (assuming ID 2 if fresh DB)
+            sellerId: 2 // Bob Seller (ID 2 due to fresh DB and user seed order)
         },
         {
             name: 'Double Door Fridge - Stainless Steel', description: 'Like new double door refrigerator, energy efficient and spacious. Minor scuffs on side.',
             price: 450.00, category: 'Refrigerators', condition: 'Like New', stock: 5,
             images: JSON.stringify(['https://placehold.co/600x400/28A745/white?text=Refurb+Fridge+1']),
-            sellerId: 3 // Charlie Seller (assuming ID 3 if fresh DB)
+            sellerId: 3 // Charlie Seller (ID 3)
         },
         {
             name: 'Smartphone XYZ - 128GB', description: 'Certified refurbished Smartphone XYZ, 128GB storage, unlocked. Good working condition, screen has minor scratches.',
             price: 199.00, category: 'Mobile Phones', condition: 'Good', stock: 15,
             images: JSON.stringify(['https://placehold.co/600x400/FFC107/black?text=Refurb+Mobile+1', 'https://placehold.co/600x400/FFC107/black?text=Refurb+Mobile+2']),
-            sellerId: 2 // Bob Seller
+            sellerId: 2 // Bob Seller (ID 2)
         },
         {
             name: 'Ultrabook Pro 13" - Core i7', description: 'Seller refurbished Ultrabook Pro, 13-inch display, Core i7, 16GB RAM, 512GB SSD. Excellent cosmetic condition.',
             price: 599.50, category: 'Laptops', condition: 'Excellent', stock: 8,
             images: JSON.stringify(['https://placehold.co/600x400/6C757D/white?text=Refurb+Laptop+1']),
-            sellerId: 3 // Charlie Seller
+            sellerId: 3 // Charlie Seller (ID 3)
         },
         {
             name: 'Energy Star Washing Machine', description: 'Refurbished front-load washing machine. Energy Star certified. Fully tested and functional.',
             price: 320.00, category: 'Appliances', condition: 'Good', stock: 3,
             images: JSON.stringify(['https://placehold.co/600x400/DC3545/white?text=Washer+1']),
-            sellerId: 5 // Eco Appliances Inc. (assuming ID 5 if fresh DB)
+            sellerId: 5 // Eco Appliances Inc. (ID 5)
         },
         {
             name: 'Gaming Laptop 15.6" - RTX GPU', description: 'Refurbished gaming laptop with dedicated RTX graphics. Perfect for gaming and creative work. Condition: Like New.',
             price: 750.00, category: 'Laptops', condition: 'Like New', stock: 4,
             images: JSON.stringify(['https://placehold.co/600x400/17A2B8/white?text=Gaming+Laptop']),
-            sellerId: 2 // Bob Seller
+            sellerId: 2 // Bob Seller (ID 2)
         }
     ];
     console.log('Seeding products...');
@@ -144,8 +146,23 @@ const main = async () => {
     let overallSuccess = true; // Flag to track if any error occurred
 
     try {
+        // Ensure database directory exists
+        const dbDir = path.dirname(dbPath);
+        if (!fs.existsSync(dbDir)) {
+            fs.mkdirSync(dbDir, { recursive: true });
+            console.log(`Seed.js: Created database directory ${dbDir}`);
+        }
+
+        // Delete existing database file to ensure a clean start for seeding
+        if (fs.existsSync(dbPath)) {
+            console.log(`Seed.js: Found existing database file at ${dbPath}. Deleting for a fresh seed.`);
+            fs.unlinkSync(dbPath);
+            console.log(`Seed.js: Deleted existing database file.`);
+        }
+
         // 1. Open Database
         // The sqlite3.Database constructor opens the database in OPEN_READWRITE | OPEN_CREATE mode by default.
+        // Since we deleted it (if it existed), it will always be created fresh.
         db = await new Promise((resolve, reject) => {
             const instance = new sqlite3.Database(dbPath, (err) => {
                 if (err) {
@@ -161,7 +178,7 @@ const main = async () => {
         // 2. Apply Schema
         console.log('Applying schema...');
         await applySchema(db);
-        console.log('Schema applied (or already existed).');
+        console.log('Schema applied.');
 
         // 3. Seed Users
         await seedUsers(db);
@@ -194,7 +211,7 @@ const main = async () => {
                     });
                 });
             } catch (closeDbError) {
-                // Error during close is already logged by the promise reject, overallSuccess is false.
+                // Error during close is already logged by the promise reject, overallSuccess is false if it failed.
             }
         }
 
@@ -205,7 +222,7 @@ const main = async () => {
             console.log('Seeding script finished with errors.');
             process.exitCode = 1;
         }
-        // Optional: process.exit(process.exitCode); // if script hangs
+        // Optional: process.exit(process.exitCode); // if script hangs for any reason
     }
 };
 
@@ -214,12 +231,11 @@ const main = async () => {
 // this .catch() will handle it.
 main().catch(topLevelError => {
     console.error('Top-level unhandled error in seeding script execution:', topLevelError.message);
-    if (topLevelError.stack) console.error(topLevelError.stack);
+    if (topLevelError.stack && process.env.NODE_ENV !== 'production') {
+        console.error(topLevelError.stack);
+    }
     process.exitCode = 1;
     // Ensure process exits if it was a catastrophic failure before the finally block in main
-    if (typeof process.exitCode !== 'undefined') { // Check if exit code already set
-        process.exit(process.exitCode);
-    } else {
-        process.exit(1);
-    }
+    // or if the finally block itself failed to set exit code correctly.
+    process.exit(1); // Exit with error code
 });
