@@ -28,11 +28,9 @@ npm install
 echo "Initializing database..."
 npm run db:init
 
-# Start the backend server
+# Start the backend server in production mode
 # The server will listen on port 9000 as configured in backend/server.js.
-# In production, it may also serve the frontend application.
-echo "Starting backend server on port 9000..."
-# Ensure NODE_ENV is set appropriately in the execution environment or within the npm start script
-# For example, to run in production: NODE_ENV=production npm start
+# NODE_ENV=production ensures it serves the frontend static files.
+echo "Starting backend server on port 9000 in production mode..."
 # The 'start' script is defined in backend/package.json.
-npm start
+NODE_ENV=production npm start
